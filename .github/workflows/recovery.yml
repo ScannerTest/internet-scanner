@@ -9,7 +9,7 @@
 # ============================================================
 name: Recovery
 
-'on':
+on:
   workflow_dispatch:
     inputs:
       mode:
