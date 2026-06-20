@@ -166,6 +166,7 @@ with open('$NO_AUTH_CAMERAS', 'w') as f:
 
 print(f'Found {len(cameras)} camera/IoT devices from HTTP analysis')
 " 2>&1 || echo "HTTP camera analysis encountered errors"
+fi
 
 # ---------- Detection 3: Combine Camera Sources ----------
 echo "[3/4] Combining all camera detection sources..."
