@@ -1,0 +1,296 @@
+# ============================================================
+# Internet Scanner - Recovery Workflow
+#
+# Handles:
+# - Retrying failed WHOIS lookups (rate limit recovery)
+# - Resuming partial scan blocks that timed out
+# - Processing artifacts from failed runs
+# - NEVER loses data - picks up where things left off
+# ============================================================
+name: Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Recovery mode'
+        required: true
+        default: 'auto'
+        type: choice
+        options:
+          - 'auto'      # Automatically detect and fix everything
+          - 'whois'     # Retry failed WHOIS lookups only
+          - 'resume'    # Resume incomplete scan blocks (requires block input)
+      block_id:
+        description: 'Specific block ID to resume (or "auto" for all incomplete)'
+        required: true
+        default: 'auto'
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  # ============================================================
+  # Detect what needs recovery
+  # ============================================================
+  detect:
+    name: "Detect Recovery Needs"
+    runs-on: ubuntu-latest
+    outputs:
+      need_whois_retry: ${{ steps.check.outputs.need_whois_retry }}
+      need_resume: ${{ steps.check.outputs.need_resume }}
+      retry_count: ${{ steps.check.outputs.retry_count }}
+      incomplete_blocks: ${{ steps.check.outputs.incomplete_blocks }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Download WHOIS artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: whois-*
+          path: recovery_whois
+      
+      - name: Download scan state
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: scan-state
+          path: recovery_state
+      
+      - name: Download blocks config
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: blocks-config
+          path: recovery_blocks
+      
+      - name: Check what needs recovery
+        id: check
+        run: |
+          echo "need_whois_retry=false" >> $GITHUB_OUTPUT
+          echo "need_resume=false" >> $GITHUB_OUTPUT
+          echo "retry_count=0" >> $GITHUB_OUTPUT
+          echo "incomplete_blocks=[]" >> $GITHUB_OUTPUT
+          
+          # Check for failed WHOIS retries
+          if [ -f "recovery_whois/whois_retry.json" ]; then
+            COUNT=$(python3 -c "import json; print(len(json.load(open('recovery_whois/whois_retry.json'))))" 2>/dev/null || echo 0)
+            if [ "$COUNT" -gt 0 ]; then
+              echo "need_whois_retry=true" >> $GITHUB_OUTPUT
+              echo "retry_count=$COUNT" >> $GITHUB_OUTPUT
+              echo "Found $COUNT failed WHOIS lookups to retry"
+            fi
+          fi
+          
+          # Find incomplete blocks by checking scan state vs blocks config
+          INCOMPLETE=$(python3 -c "
+import json, os
+
+# Load blocks config
+blocks = []
+blocks_file = 'recovery_blocks/blocks.json'
+if os.path.exists(blocks_file):
+    with open(blocks_file) as f:
+        data = json.load(f)
+        blocks = data.get('blocks', [])
+
+# Load scan state
+state = {'blocks': {}}
+state_file = 'recovery_state/scan_state.json'
+if os.path.exists(state_file):
+    with open(state_file) as f:
+        state = json.load(f)
+
+# Find incomplete blocks
+completed = set(int(k) for k, v in state.get('blocks', {}).items() if v == 'completed')
+incomplete = [b for b in blocks if b['block'] not in completed]
+
+print(json.dumps([b['block'] for b in incomplete]))
+" 2>/dev/null || echo '[]')
+          
+          INCOMPLETE_COUNT=$(echo "$INCOMPLETE" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
+          
+          if [ "$INCOMPLETE_COUNT" -gt 0 ]; then
+            echo "need_resume=true" >> $GITHUB_OUTPUT
+            echo "Found $INCOMPLETE_COUNT incomplete scan blocks"
+          fi
+          
+          echo "incomplete_blocks=$INCOMPLETE" >> $GITHUB_OUTPUT
+          echo "Recovery assessment complete"
+
+  # ============================================================
+  # Retry Failed WHOIS Lookups
+  # ============================================================
+  whois-retry:
+    name: "Retry Failed WHOIS"
+    runs-on: ubuntu-latest
+    needs: [detect]
+    if: ${{ needs.detect.outputs.need_whois_retry == 'true' && (github.event.inputs.mode == 'auto' || github.event.inputs.mode == 'whois') }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Download WHOIS cache
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: whois-cache
+          path: whois_data
+      
+      - name: Download WHOIS retry queue
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: whois-results
+          path: whois_data
+      
+      - name: Extract IPs to retry
+        run: |
+          python3 -c "
+import json
+retry = []
+for f in ['whois_data/whois_retry.json', 'whois_data/whois_retry_v2.json']:
+    try:
+        with open(f) as fh:
+            retry.extend(json.load(fh))
+    except:
+        pass
+
+ips = [r.get('ip', '') for r in retry if r.get('ip')]
+with open('retry_ips.txt', 'w') as f:
+    for ip in ips:
+        f.write(ip + '\n')
+print(f'Retrying {len(ips)} IPs')
+"
+      
+      - name: Retry WHOIS
+        if: hashFiles('retry_ips.txt') != ''
+        run: |
+          [ -f "whois_data/whois_cache.json" ] && cp "whois_data/whois_cache.json" whois_cache.json || echo '{}' > whois_cache.json
+          bash scripts/whois-cached.sh \
+            retry_ips.txt \
+            whois_cache.json \
+            whois_retry_v2.json \
+            whois_retry_results.json \
+            whois_retry_checkpoint.json
+      
+      - name: Upload Updated Cache
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whois-cache-recovered
+          path: whois_cache.json
+          retention-days: 90
+      
+      - name: Upload Retry Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whois-retry-results
+          path: |
+            whois_retry_results.json
+            whois_retry_v2.json
+          retention-days: 90
+
+  # ============================================================
+  # Resume Incomplete Scan Blocks
+  # ============================================================
+  resume-scans:
+    name: "Resume Block ${{ matrix.block_id }}"
+    runs-on: ubuntu-latest
+    needs: [detect]
+    if: ${{ needs.detect.outputs.need_resume == 'true' && (github.event.inputs.mode == 'auto' || github.event.inputs.mode == 'resume') }}
+    
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        block_id: ${{ fromJSON(needs.detect.outputs.incomplete_blocks) }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Download blocks config (for CIDR mapping)
+        uses: actions/download-artifact@v4
+        with:
+          name: blocks-config
+          path: blocks_data
+      
+      - name: Get CIDR for this block
+        id: get_cidr
+        run: |
+          python3 -c "
+import json
+with open('blocks_data/blocks.json') as f:
+    data = json.load(f)
+blocks = data.get('blocks', [])
+for b in blocks:
+    if b['block'] == ${{ matrix.block_id }}:
+        print(f'cidr={b[\"cidr\"]}')
+        break
+" >> $GITHUB_OUTPUT
+      
+      - name: Download previous checkpoint (if exists)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: checkpoint-${{ matrix.block_id }}
+          path: checkpoints
+      
+      - name: Download previous partial results (if exists)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: scan-results-${{ matrix.block_id }}
+          path: scan_results/block_${{ matrix.block_id }}
+      
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq masscan jq netcat-openbsd bc
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+          go install github.com/zmap/zgrab2@latest
+          go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+      
+      - name: Resume Scan
+        continue-on-error: true
+        run: |
+          bash scripts/scan-block.sh \
+            "${{ matrix.block_id }}" \
+            "${{ steps.get_cidr.outputs.cidr }}" \
+            config/ports.txt \
+            "scan_results/block_${{ matrix.block_id }}" \
+            "checkpoints"
+      
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-results-${{ matrix.block_id }}
+          path: scan_results/block_${{ matrix.block_id }}
+          retention-days: 90
+      
+      - name: Upload Checkpoint
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint-${{ matrix.block_id }}
+          path: checkpoints/
+          retention-days: 90

@@ -1,0 +1,307 @@
+id: camera-detection
+
+info:
+  name: IoT Camera Detection
+  author: internet-scanner
+  severity: info
+  description: Detects various IP camera web interfaces and IoT devices
+  tags: iot,camera,security,network
+
+# Default HTTP request template used by all http-based templates
+requests:
+  # ---- Hikvision Camera Detection ----
+  - raw:
+      - |
+        GET / HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: Mozilla/5.0 (compatible; InternetScanner/1.0)
+    matchers-condition: and
+    matchers:
+      - type: word
+        words:
+          - "Hikvision"
+          - "hikvision"
+          - "HIK"
+        part: body
+      - type: status
+        status:
+          - 200
+          - 401
+          - 403
+    extractors:
+      - type: regex
+        part: body
+        regex:
+          - "Hikvision [\\d.]+"
+          - "HIK/iVS"
+    name: hikvision-camera
+
+  # ---- Dahua Camera Detection ----
+  - raw:
+      - |
+        GET / HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: Mozilla/5.0
+    matchers-condition: and
+    matchers:
+      - type: word
+        words:
+          - "Dahua"
+          - "dahua"
+          - "Web Service"
+          - "DVR"
+        part: body
+      - type: status
+        status:
+          - 200
+          - 401
+    name: dahua-camera
+
+  # ---- Axis Camera Detection ----
+  - raw:
+      - |
+        GET / HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: Mozilla/5.0
+    matchers-condition: and
+    matchers:
+      - type: word
+        words:
+          - "AXIS"
+          - "axis"
+        part: body
+      - type: status
+        status:
+          - 200
+    name: axis-camera
+
+  # ---- Default Camera Login Pages ----
+  - raw:
+      - |
+        GET /login.html HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: Mozilla/5.0
+    matchers-condition: and
+    matchers:
+      - type: word
+        words:
+          - "admin"
+          - "password"
+          - "login"
+          - "camera"
+        part: body
+      - type: status
+        status:
+          - 200
+    name: camera-login-page
+
+  # ---- No-Auth Camera Snapshot (common paths) ----
+  - raw:
+      - |
+        GET /snapshot.cgi HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: Mozilla/5.0
+    matchers:
+      - type: word
+        words:
+          - "Content-Type: image/"
+        part: header
+    name: no-auth-snapshot
+
+  - raw:
+      - |
+        GET /cgi-bin/snapshot.cgi HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: Mozilla/5.0
+    matchers:
+      - type: word
+        words:
+          - "Content-Type: image/"
+        part: header
+    name: no-auth-cgi-snapshot
+
+  - raw:
+      - |
+        GET /tmpfs/auto.jpg HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: Mozilla/5.0
+    matchers:
+      - type: word
+        words:
+          - "Content-Type: image/"
+        part: header
+    name: hikvision-snapshot
+
+  # ---- Live Stream Pages ----
+  - raw:
+      - |
+        GET /live HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: Mozilla/5.0
+    matchers-condition: and
+    matchers:
+      - type: word
+        words:
+          - "Live"
+          - "Stream"
+          - "View"
+        part: body
+      - type: status
+        status:
+          - 200
+    name: live-stream-page
+
+  # ---- ONVIF Detection ----
+  - raw:
+      - |
+        POST /onvif/device_service HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/soap+xml
+        Content-Length: 300
+
+        <?xml version="1.0" encoding="utf-8"?>
+        <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"
+          xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+          <soap:Body>
+            <tds:GetDeviceInformation/>
+          </soap:Body>
+        </soap:Envelope>
+    matchers-condition: and
+    matchers:
+      - type: word
+        words:
+          - "ONVIF"
+          - "GetDeviceInformationResponse"
+        part: body
+      - type: status
+        status:
+          - 200
+    name: onvif-device
+
+  # ---- Foscam Detection ----
+  - raw:
+      - |
+        GET / HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: Mozilla/5.0
+    matchers-condition: and
+    matchers:
+      - type: word
+        words:
+          - "Foscam"
+          - "foscam"
+          - "FOSCAM"
+        part: body
+      - type: status
+        status:
+          - 200
+    name: foscam-camera
+
+  # ---- Webcam Directory Listings ----
+  - raw:
+      - |
+        GET /cgi-bin/ HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: Mozilla/5.0
+    matchers-condition: and
+    matchers:
+      - type: word
+        words:
+          - "Index of"
+          - "cgi-bin"
+        part: body
+      - type: status
+        status:
+          - 200
+    name: cgi-directory-listing
+
+  # ---- Reolink Detection ----
+  - raw:
+      - |
+        GET / HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: Mozilla/5.0
+    matchers-condition: and
+    matchers:
+      - type: word
+        words:
+          - "Reolink"
+          - "reolink"
+        part: body
+      - type: status
+        status:
+          - 200
+    name: reolink-camera
+
+  # ---- Camera API Endpoints ----
+  - raw:
+      - |
+        GET /api/v1/camera/info HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: Mozilla/5.0
+    matchers-condition: and
+    matchers:
+      - type: word
+        words:
+          - "camera"
+          - "model"
+          - "firmware"
+        part: body
+      - type: status
+        status:
+          - 200
+    name: camera-api
+
+  # ---- Generic Camera Web Interface ----
+  - raw:
+      - |
+        GET /index.html HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: Mozilla/5.0
+    matchers-condition: and
+    matchers:
+      - type: word
+        words:
+          - "IP Camera"
+          - "Network Camera"
+          - "Web Camera"
+          - "CCTV"
+          - "Surveillance"
+        part: body
+      - type: status
+        status:
+          - 200
+    name: generic-camera-web
+
+# ---- Network-level RTSP probe (triggered separately on port 554) ----
+network:
+  - inputs:
+      - data: "TElWRTE9ERSBydHNwOi8vZXhhbXBsZS5jb20vIFJvc2VWZXJzaW9uIFVua25vd24NCg0K"
+        # This is a placeholder - RTSP is handled by the scan-block.sh script directly
+        # since nuclei network templates have port limitations
+    host:
+      - "{{Hostname}}"
+    port: 554
+    read-size: 256
+    matchers:
+      - type: word
+        words:
+          - "RTSP/1.0"
+          - "200 OK"
+    name: rtsp-probe
+
+# ---- RTSP DESCRIBE probe via raw request ----
+  - inputs:
+      - data: "REVTQ1JJQkUgcnRzcDovL3t7SG9zdG5hbWV9fS9yZXNvdXJjZSBSU1BFLzEuMA0KQ1NlcTogMQ0KDQo="
+    host:
+      - "{{Hostname}}"
+    port: 554
+    read-size: 512
+    matchers:
+      - type: word
+        words:
+          - "RTSP/1.0"
+          - "200 OK"
+          - "x-rtsp-server"
+          - "cseq"
+    name: rtsp-describe

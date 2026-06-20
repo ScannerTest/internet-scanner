@@ -1,0 +1,451 @@
+# ============================================================
+# Internet Scanner - Main Workflow
+#
+# A distributed internet-wide scanner using GitHub Actions.
+# Splits IPv4 into 256 blocks, scans in parallel with
+# checkpointing, banner grabbing, and camera detection.
+#
+# DURABILITY GUARANTEES:
+# - Every job saves artifacts even on failure (if: always())
+# - masscan --resume support for partial scans
+# - State tracking across runs
+# - No work is ever lost
+# ============================================================
+name: Internet Scanner
+
+on:
+  workflow_dispatch:
+    inputs:
+      blocks:
+        description: 'Number of CIDR blocks to scan (1-256, 256 = full IPv4)'
+        required: true
+        default: '4'
+        type: choice
+        options:
+          - '1'      # Test: 1 block (~16M IPs)
+          - '4'      # Quick: 4 blocks
+          - '16'     # Medium: 16 blocks
+          - '64'     # Large: 64 blocks
+          - '128'    # Very large
+          - '256'    # Full IPv4
+      rate:
+        description: 'Masscan packet rate (slower = stealthier)'
+        required: true
+        default: '5000'
+        type: choice
+        options:
+          - '1000'   # Very stealthy
+          - '5000'   # Stealthy (recommended start)
+          - '10000'  # Moderate
+          - '25000'  # Fast
+          - '50000'  # Aggressive
+      resume:
+        description: 'Resume previous scan (skip completed blocks)'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+      whois:
+        description: 'Run WHOIS lookup on discovered IPs'
+        required: true
+        default: 'no'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+
+  schedule:
+    # Weekly full scan - Sunday at 2 AM
+    - cron: '0 2 * * 0'
+
+# Concurrency: cancel previous runs of the same workflow
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Environment variables
+env:
+  MASSCAN_RATE: ${{ github.event.inputs.rate || '5000' }}
+  BLOCKS_TO_SCAN: ${{ github.event.inputs.blocks || '4' }}
+  RESUME_MODE: ${{ github.event.inputs.resume || 'yes' }}
+  RUN_WHOIS: ${{ github.event.inputs.whois || 'no' }}
+
+jobs:
+
+  # ============================================================
+  # JOB 1: INIT - Generate CIDR ranges and check for previous state
+  # ============================================================
+  init:
+    name: "Init - Generate Ranges"
+    runs-on: ubuntu-latest
+    outputs:
+      blocks: ${{ steps.gen.outputs.blocks }}
+      block_count: ${{ steps.gen.outputs.block_count }}
+      has_previous_state: ${{ steps.gen.outputs.has_previous_state }}
+      completed_blocks: ${{ steps.gen.outputs.completed_blocks }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Download previous scan state (if resuming)
+        id: download_state
+        if: env.RESUME_MODE == 'yes'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: scan-state
+          path: previous_state
+      
+      - name: Generate CIDR blocks
+        id: gen
+        run: |
+          SKIP_FLAG=""
+          if [ "$RESUME_MODE" = "yes" ] && [ -f "previous_state/scan_state.json" ]; then
+            SKIP_FLAG="--skip-completed --artifact-dir previous_state"
+            echo "has_previous_state=true" >> $GITHUB_OUTPUT
+            echo "Resuming from previous scan state"
+          else
+            echo "has_previous_state=false" >> $GITHUB_OUTPUT
+            echo "Starting fresh scan"
+          fi
+          
+          python3 scripts/generate-ranges.py \
+            --max-blocks $BLOCKS_TO_SCAN \
+            $SKIP_FLAG \
+            --output blocks.json
+          
+          # Generate matrix JSON - only include block ID and CIDR (minimize output size)
+          python3 -c "
+import json
+blocks = json.load(open('blocks.json'))['blocks']
+# Only emit the fields needed by the matrix (block ID and CIDR)
+minimal = [{'block': b['block'], 'cidr': b['cidr']} for b in blocks]
+print(f'block_count={len(blocks)}')
+print(f'blocks={json.dumps(minimal)}')
+" >> $GITHUB_OUTPUT
+          
+          echo "Generated $(python3 -c "import json; print(len(json.load(open('blocks.json'))['blocks']))") blocks"
+      
+      - name: Upload blocks configuration
+        uses: actions/upload-artifact@v4
+        with:
+          name: blocks-config
+          path: blocks.json
+          retention-days: 7
+          if-no-files-found: error
+
+  # ============================================================
+  # JOB 2: SCAN BLOCKS - Matrix of parallel scanning jobs
+  # ============================================================
+  scan:
+    name: "Scan Block ${{ matrix.block.block }}"
+    runs-on: ubuntu-latest
+    needs: [init]
+    if: ${{ fromJSON(needs.init.outputs.block_count) > 0 }}
+    
+    strategy:
+      fail-fast: false  # CRITICAL: Don't cancel other jobs if one fails
+      max-parallel: 20  # Max concurrent runners (free account limit)
+      matrix:
+        block: ${{ fromJSON(needs.init.outputs.blocks) }}
+    
+    env:
+      BLOCK_ID: ${{ matrix.block.block }}
+      CIDR: ${{ matrix.block.cidr }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            masscan \
+            jq \
+            whois \
+            bc \
+            netcat-openbsd \
+            2>&1 | tail -5
+      
+      - name: Install Go-based Tools
+        run: |
+          # Install httpx for HTTP banner grabbing
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest 2>&1 | tail -1
+          
+          # Install zgrab2 for protocol banner grabbing
+          go install github.com/zmap/zgrab2@latest 2>&1 | tail -1
+          
+          # Install nuclei for template-based detection
+          go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest 2>&1 | tail -1
+          
+          # Add Go binaries to PATH
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+      
+      - name: Download Checkpoint (if resuming)
+        id: dl_checkpoint
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: checkpoint-${{ env.BLOCK_ID }}
+          path: checkpoints
+      
+      - name: Download Previous Block Results (if resuming)
+        id: dl_results
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: scan-results-${{ env.BLOCK_ID }}
+          path: scan_results/block_${{ env.BLOCK_ID }}
+      
+      - name: Run Block Scan
+        id: scan_block
+        continue-on-error: true  # Save partial results even on error
+        run: |
+          mkdir -p scan_results checkpoints
+          bash scripts/scan-block.sh \
+            "$BLOCK_ID" \
+            "$CIDR" \
+            config/ports.txt \
+            "scan_results/block_$BLOCK_ID" \
+            "checkpoints"
+      
+      - name: Upload Block Results (ALWAYS - even on failure)
+        if: always()  # CRITICAL: Never lose results
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-results-${{ env.BLOCK_ID }}
+          path: scan_results/block_${{ env.BLOCK_ID }}
+          retention-days: 90
+          if-no-files-found: warn
+      
+      - name: Upload Checkpoint (ALWAYS - for resume)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint-${{ env.BLOCK_ID }}
+          path: checkpoints/
+          retention-days: 90
+          if-no-files-found: warn
+      
+      - name: Report Status
+        if: always()
+        run: |
+          if [ -f "scan_results/block_$BLOCK_ID/state_${BLOCK_ID}.json" ]; then
+            echo "### Block $BLOCK_ID Status" >> $GITHUB_STEP_SUMMARY
+            cat "scan_results/block_$BLOCK_ID/state_${BLOCK_ID}.json" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================================
+  # JOB 3: WHOIS LOOKUPS (optional, runs after all scans)
+  # ============================================================
+  whois:
+    name: "WHOIS - Cached IP Lookups"
+    runs-on: ubuntu-latest
+    needs: [init, scan]
+    if: ${{ always() && env.RUN_WHOIS == 'yes' }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Download All Scan Results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: scan-results-*
+          path: all_scan_results
+          merge-multiple: true
+      
+      - name: Combine All Live Hosts
+        run: |
+          # Collect all live hosts from all blocks
+          find all_scan_results -name "live_hosts_*.txt" -exec cat {} + > all_live_ips.txt || true
+          sort -u all_live_ips.txt -o all_live_ips.txt
+          echo "Total unique IPs for WHOIS: $(wc -l < all_live_ips.txt)"
+      
+      - name: Download Previous WHOIS Cache
+        id: dl_whois_cache
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: whois-cache
+          path: whois_cache_prev
+      
+      - name: Restore Previous Cache
+        run: |
+          if [ -f "whois_cache_prev/whois_cache.json" ]; then
+            cp whois_cache_prev/whois_cache.json whois_cache.json
+            echo "Restored WHOIS cache: $(python3 -c "import json; print(len(json.load(open('whois_cache.json'))))") entries"
+          else
+            echo '{}' > whois_cache.json
+          fi
+      
+      - name: Run WHOIS (capped at 500 IPs per run to avoid timeout)
+        run: |
+          # Cap the IP list to avoid 6-hour timeout (500 WHOIS lookups max)
+          head -500 all_live_ips.txt > whois_input.txt
+          
+          bash scripts/whois-cached.sh \
+            whois_input.txt \
+            whois_cache.json \
+            whois_retry.json \
+            whois_results.json \
+            whois_checkpoint.json
+      
+      - name: Upload WHOIS Cache
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whois-cache
+          path: whois_cache.json
+          retention-days: 90
+          if-no-files-found: warn
+      
+      - name: Upload WHOIS Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whois-results
+          path: |
+            whois_results.json
+            whois_retry.json
+            whois_checkpoint.json
+          retention-days: 90
+          if-no-files-found: warn
+
+  # ============================================================
+  # JOB 4: MERGE - Combine all results
+  # ============================================================
+  merge:
+    name: "Merge - Combine All Results"
+    runs-on: ubuntu-latest
+    needs: [init, scan]
+    if: ${{ always() }}  # Run even if some scan jobs failed
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Download All Scan Results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: scan-results-*
+          path: scan_results
+          merge-multiple: true
+      
+      - name: Run Merge Script
+        run: |
+          mkdir -p final_results
+          bash scripts/merge-results.sh \
+            scan_results \
+            final_results
+      
+      - name: Run Camera Detection
+        run: |
+          bash scripts/camera-detect.sh \
+            final_results \
+            camera_report
+      
+      - name: Upload Final Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-results
+          path: |
+            final_results/
+            camera_report/
+          retention-days: 90
+          if-no-files-found: warn
+      
+      - name: Generate Scan Summary
+        run: |
+          echo "## 📡 Internet Scanner - Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f "final_results/scan_summary.json" ]; then
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            cat final_results/scan_summary.json >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f "camera_report/FINAL_REPORT.md" ]; then
+            echo "### Camera Detection Report" >> $GITHUB_STEP_SUMMARY
+            head -30 camera_report/FINAL_REPORT.md >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Set Scan State (for future resumption)
+        run: |
+          python3 -c "
+import json, glob
+completed = set()
+for f in glob.glob('scan_results/state_*.json'):
+    try:
+        state = json.load(open(f))
+        if state.get('status') == 'completed':
+            completed.add(state['block_id'])
+    except: pass
+state = {'blocks': {str(b): 'completed' for b in completed}, 'total_completed': len(completed)}
+json.dump(state, open('scan_state.json', 'w'))
+print(f'Completed blocks: {len(completed)}')
+"
+      
+      - name: Upload Scan State
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-state
+          path: scan_state.json
+          retention-days: 90
+          if-no-files-found: warn
+
+  # ============================================================
+  # JOB 5: REPORT - Final notification
+  # ============================================================
+  report:
+    name: "Report - Generate Notifications"
+    runs-on: ubuntu-latest
+    needs: [merge]
+    if: ${{ always() }}
+    
+    steps:
+      - name: Download Final Report
+        uses: actions/download-artifact@v4
+        with:
+          name: final-results
+          path: final_results
+      
+      - name: Print Final Summary
+        run: |
+          echo "## ✅ Scan Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The scan has finished. Download artifacts for full results." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "final_results/camera_report/FINAL_REPORT.md" ]; then
+            echo "### 📷 Camera Detection Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat final_results/camera_report/FINAL_REPORT.md >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Count total unique hosts
+          if [ -f "final_results/all_hosts.txt" ]; then
+            HOSTS=$(wc -l < final_results/all_hosts.txt)
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Total unique hosts found: $HOSTS**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Count cameras
+          if [ -f "final_results/all_cameras.json" ]; then
+            CAMS=$(wc -l < final_results/all_cameras.json)
+            echo "**Potential cameras: $CAMS**" >> $GITHUB_STEP_SUMMARY
+          fi
