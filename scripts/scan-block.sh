@@ -114,6 +114,7 @@ step_http_banners() {
 
     if [ ! -f "$MASSCAN_OUT" ] || [ ! -s "$MASSCAN_OUT" ]; then
         echo "[BLOCK $BLOCK_ID] No masscan results, skipping HTTP banners"
+        echo '[]' > "$HTTP_BANNERS"
         return 0
     fi
 
@@ -289,7 +290,8 @@ try:
                 entry = json.loads(line)
             except:
                 continue
-            
+            if not isinstance(entry, dict):
+                continue
             ip = entry.get('host', entry.get('ip', ''))
             if not ip: continue
             
