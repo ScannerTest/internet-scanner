@@ -43,7 +43,7 @@ on:
       whois:
         description: 'Run WHOIS lookup on discovered IPs'
         required: true
-        default: 'no'
+        default: 'yes'
         type: choice
         options:
           - 'yes'
@@ -59,7 +59,7 @@ concurrency:
 env:
   MASSCAN_RATE: ${{ github.event.inputs.rate || '100000' }}
   BLOCKS_TO_SCAN: ${{ github.event.inputs.blocks || '4' }}
-  RUN_WHOIS: ${{ github.event.inputs.whois || 'no' }}
+  RUN_WHOIS: ${{ github.event.inputs.whois || 'yes' }}
 
 jobs:
 
@@ -221,7 +221,7 @@ jobs:
     name: "WHOIS - Cached IP Lookups"
     runs-on: ubuntu-latest
     needs: [init, scan]
-    if: ${{ always() && github.event.inputs.whois == 'yes' }}
+    if: ${{ always() && env.RUN_WHOIS == 'yes' }}
 
     steps:
       - name: Checkout
