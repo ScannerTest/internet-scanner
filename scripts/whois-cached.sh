@@ -160,7 +160,7 @@ while IFS= read -r ip; do
     
     # Get or lookup WHOIS
     SUBNET=$(get_subnet "$ip")
-    CACHED=$(check_cache "$subnet")
+    CACHED=$(check_cache "$SUBNET")
     
     if [ "$CACHED" != "null" ] && [ -n "$CACHED" ]; then
         # Cache hit - just record
