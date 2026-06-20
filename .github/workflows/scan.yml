@@ -230,7 +230,7 @@ jobs:
     name: "WHOIS - Cached IP Lookups"
     runs-on: ubuntu-latest
     needs: [init, scan]
-    if: ${{ always() && env.RUN_WHOIS == 'yes' }}
+    if: ${{ always() && github.event.inputs.whois == 'yes' }}
 
     steps:
       - name: Checkout
