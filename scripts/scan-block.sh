@@ -96,7 +96,7 @@ step_masscan() {
 
     # Extract live IPs from masscan results
     if [ -f "$MASSCAN_OUT" ]; then
-        grep -oP '"ip":"\K[^"]+' "$MASSCAN_OUT" 2>/dev/null | sort -u > "$ALL_LIVE_HOSTS" || true
+        grep -oP '"ip":\s*"\K[^"]+' "$MASSCAN_OUT" 2>/dev/null | sort -u > "$ALL_LIVE_HOSTS" || true
     fi
 
     HOST_COUNT=$(wc -l < "$ALL_LIVE_HOSTS" 2>/dev/null || echo 0)
@@ -123,7 +123,7 @@ step_http_banners() {
     > "$HTTP_TARGETS"
     for port in $(echo "$HTTP_PORTS" | tr ',' ' '); do
         # Match masscan JSONL: {"ip":"1.2.3.4","port":80,...}
-        grep -oP '"ip":"\K[^"]+(?=.*"port":'"$port"'[,}])' "$MASSCAN_OUT" 2>/dev/null | \
+        grep -oP '"ip":\s*"\K[^"]+(?=.*"port":\s*'"$port"'[,}])' "$MASSCAN_OUT" 2>/dev/null | \
             awk -v p="$port" '{print $1":"p}' >> "$HTTP_TARGETS" 2>/dev/null || true
     done
 
@@ -161,7 +161,7 @@ step_proto_banners() {
     extract_ips_for_port() {
         local port="$1"
         local outfile="$2"
-        grep -oP '"ip":"\K[^"]+(?=.*"port":'"$port"'[,}])' "$MASSCAN_OUT" 2>/dev/null | \
+        grep -oP '"ip":\s*"\K[^"]+(?=.*"port":\s*'"$port"'[,}])' "$MASSCAN_OUT" 2>/dev/null | \
             sort -u > "$outfile" || true
     }
 
@@ -171,10 +171,9 @@ step_proto_banners() {
     extract_ips_for_port 21  "${RESULTS_DIR}/ftp_${BLOCK_ID}.txt"
     extract_ips_for_port 3389 "${RESULTS_DIR}/rdp_${BLOCK_ID}.txt"
     extract_ips_for_port 554 "${RESULTS_DIR}/rtsp_${BLOCK_ID}.txt"
-    extract_ips_for_port 5900 "${RESULTS_DIR}/vnc_${BLOCK_ID}.txt"
-    extract_ips_for_port 5901 "${RESULTS_DIR}/vnc_${BLOCK_ID}.txt"   # append
-    extract_ips_for_port 5902 "${RESULTS_DIR}/vnc_${BLOCK_ID}.txt"   # append
-    extract_ips_for_port 5903 "${RESULTS_DIR}/vnc_${BLOCK_ID}.txt"   # append
+    # VNC: extract all ports 5900-5903 at once to avoid overwrite issues
+    grep -oP '"ip":\s*"\K[^"]+(?=.*"port":\s*(5900|5901|5902|5903)[,}])' "$MASSCAN_OUT" 2>/dev/null | \
+        sort -u > "${RESULTS_DIR}/vnc_${BLOCK_ID}.txt" || true
 
     # Run zgrab2 for protocols it supports (SSH, Telnet, FTP, etc.)
     # zgrab2 outputs JSON per line
@@ -223,7 +222,7 @@ step_nuclei_scan() {
     fi
 
     # Extract all IPs for nuclei scanning
-    grep -oP '"ip":"\K[^"]+' "$MASSCAN_OUT" 2>/dev/null | \
+    grep -oP '"ip":\s*"\K[^"]+' "$MASSCAN_OUT" 2>/dev/null | \
         sort -u > "${RESULTS_DIR}/nuclei_targets_${BLOCK_ID}.txt" || true
 
     if [ ! -s "${RESULTS_DIR}/nuclei_targets_${BLOCK_ID}.txt" ]; then
@@ -328,7 +327,7 @@ except Exception as e:
 
     # Detection 4: Known camera web ports (8000=Hikvision, 8080=common, 81/82/88=alt)
     for port in 8000 8080 81 82 88; do
-        grep -oP '"ip":"\K[^"]+(?=.*"port":'"$port"'[,}])' "$MASSCAN_OUT" 2>/dev/null | \
+        grep -oP '"ip":\s*"\K[^"]+(?=.*"port":\s*'"$port"'[,}])' "$MASSCAN_OUT" 2>/dev/null | \
             while IFS= read -r ip; do
                 echo "{\"ip\":\"$ip\",\"type\":\"camera_port\",\"port\":$port,\"confidence\":2,\"source\":\"port_hint\"}" >> "$CAMERA_TMP"
             done || true
@@ -373,7 +372,7 @@ step_summary() {
     # Count per-port stats
     PORT_STATS="{}"
     if [ -f "$MASSCAN_OUT" ] && [ -s "$MASSCAN_OUT" ]; then
-        PORT_STATS=$(grep -oP '"port":\K[0-9]+' "$MASSCAN_OUT" 2>/dev/null | \
+        PORT_STATS=$(         grep -oP '"port":\s*\K[0-9]+' "$MASSCAN_OUT" 2>/dev/null | \
             sort | uniq -c | sort -rn | head -20 | \
             awk '{printf "%s:%d,", $2, $1}' | sed 's/,$//') || PORT_STATS="{}"
     fi
