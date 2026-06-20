@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Generate /24 subnet CIDRs from blocks config for WHOIS scanning.
-Only generates up to --max-subnets per run since WHOIS is rate-limited."""
+"""Generate a sample IP per /24 subnet from blocks config for WHOIS scanning.
+Outputs bare IPs (e.g. 1.0.0.1) not CIDR notation, because whois servers
+expect individual IPs. Caching in whois-cached.sh groups by /24 subnet."""
 import argparse
 import ipaddress
 import json
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate /24 subnets from blocks config")
+    parser = argparse.ArgumentParser(description="Generate sample IPs per /24 subnet")
     parser.add_argument("blocks_file", help="Path to blocks.json")
     parser.add_argument("output_file", help="Output file path")
-    parser.add_argument("--max-subnets", type=int, default=10000,
-                        help="Max subnets to generate (default 10000, ~2.8h at 1/sec)")
+    parser.add_argument("--max-subnets", type=int, default=20000,
+                        help="Max subnets to generate (default 20000, ~5.5h at 1/sec)")
     args = parser.parse_args()
 
     with open(args.blocks_file) as f:
@@ -28,7 +29,8 @@ def main():
                     for c in range(256):
                         if count >= args.max_subnets:
                             break
-                        out.write(f"{prefix}.{b}.{c}.0/24\n")
+                        # Use .1 as representative IP for this /24
+                        out.write(f"{prefix}.{b}.{c}.1\n")
                         count += 1
                     if count >= args.max_subnets:
                         break
@@ -37,12 +39,14 @@ def main():
                 for subnet in net.subnets(new_prefix=24):
                     if count >= args.max_subnets:
                         break
-                    out.write(f"{subnet}\n")
+                    # Use first host as representative IP
+                    first_host = next(subnet.hosts())
+                    out.write(f"{first_host}\n")
                     count += 1
                 if count >= args.max_subnets:
                     break
 
-    print(f"Generated {count} /24 subnets")
+    print(f"Generated {count} /24 subnet sample IPs")
 
 if __name__ == "__main__":
     main()
