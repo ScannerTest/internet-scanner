@@ -31,7 +31,7 @@ on:
       rate:
         description: 'Masscan packet rate (slower = stealthier)'
         required: true
-        default: '5000'
+        default: '50000'
         type: choice
         options:
           - '1000'
@@ -39,6 +39,7 @@ on:
           - '10000'
           - '25000'
           - '50000'
+          - '100000'
       resume:
         description: 'Resume previous scan (skip completed blocks)'
         required: true
@@ -64,7 +65,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  MASSCAN_RATE: ${{ github.event.inputs.rate || '5000' }}
+  MASSCAN_RATE: ${{ github.event.inputs.rate || '50000' }}
   BLOCKS_TO_SCAN: ${{ github.event.inputs.blocks || '4' }}
   RESUME_MODE: ${{ github.event.inputs.resume || 'yes' }}
   RUN_WHOIS: ${{ github.event.inputs.whois || 'no' }}
