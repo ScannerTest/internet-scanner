@@ -103,7 +103,8 @@ if os.path.exists('$ALL_HTTP_BANNERS'):
                 entry = json.loads(line)
             except:
                 continue
-            
+            if not isinstance(entry, dict):
+                continue
             ip = entry.get('host', entry.get('ip', ''))
             if not ip or ip in seen_ips:
                 continue

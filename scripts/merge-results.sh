@@ -22,6 +22,7 @@ echo "============================================================"
 echo "Collecting results from all blocks..."
 
 COMBINED_CAMERAS="${OUTPUT_DIR}/all_cameras.json"
+COMBINED_HTTP_BANNERS="${OUTPUT_DIR}/all_http_banners.json"
 COMBINED_HOSTS="${OUTPUT_DIR}/all_hosts.txt"
 COMBINED_SUMMARY="${OUTPUT_DIR}/scan_summary.json"
 COMBINED_TOP_PORTS="${OUTPUT_DIR}/top_ports.csv"
@@ -29,6 +30,7 @@ TIMELINE="${OUTPUT_DIR}/scan_timeline.json"
 
 # Initialize files
 echo '[]' > "$COMBINED_CAMERAS"
+echo '[]' > "$COMBINED_HTTP_BANNERS"
 > "$COMBINED_HOSTS"
 
 # Find all block result directories
@@ -78,6 +80,12 @@ for block_dir in "${BLOCK_DIRS[@]}"; do
             hosts_file="${block_dir}/live_hosts_${BID}.txt"
             [ -f "$hosts_file" ] && cat "$hosts_file" >> "$COMBINED_HOSTS"
             
+            # HTTP banners (NDJSON)
+            http_file="${block_dir}/http_banners_${BID}.json"
+            if [ -f "$http_file" ] && [ -s "$http_file" ]; then
+                cat "$http_file" >> "${COMBINED_HTTP_BANNERS}.tmp" 2>/dev/null || true
+            fi
+
             # Cameras (NDJSON format)
             cams_file="${block_dir}/cameras_${BID}.json"
             if [ -f "$cams_file" ] && [ -s "$cams_file" ]; then
@@ -112,6 +120,12 @@ except:
         hosts_file="${block_dir}/live_hosts_${BLOCK_ID}.txt"
         [ -f "$hosts_file" ] && cat "$hosts_file" >> "$COMBINED_HOSTS"
         
+        # HTTP banners (NDJSON)
+        http_file="${block_dir}/http_banners_${BLOCK_ID}.json"
+        if [ -f "$http_file" ] && [ -s "$http_file" ]; then
+            cat "$http_file" >> "${COMBINED_HTTP_BANNERS}.tmp" 2>/dev/null || true
+        fi
+
         cams_file="${block_dir}/cameras_${BLOCK_ID}.json"
         if [ -f "$cams_file" ] && [ -s "$cams_file" ]; then
             if head -c 1 "$cams_file" 2>/dev/null | grep -q '\['
@@ -144,6 +158,12 @@ if [ -f "${COMBINED_CAMERAS}.tmp" ]; then
     rm -f "${COMBINED_CAMERAS}.tmp"
 fi
 TOTAL_CAMERAS=$(wc -l < "$COMBINED_CAMERAS" 2>/dev/null || echo 0)
+
+# Deduplicate HTTP banners
+if [ -f "${COMBINED_HTTP_BANNERS}.tmp" ]; then
+    sort -u "${COMBINED_HTTP_BANNERS}.tmp" > "$COMBINED_HTTP_BANNERS" 2>/dev/null || true
+    rm -f "${COMBINED_HTTP_BANNERS}.tmp"
+fi
 
 # ---------- Generate Top Ports Stats ----------
 echo "port,count" > "$COMBINED_TOP_PORTS"
