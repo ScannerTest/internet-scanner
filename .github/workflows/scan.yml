@@ -118,7 +118,7 @@ jobs:
             $SKIP_FLAG \
             --output blocks.json
           python3 scripts/generate-matrix.py >> $GITHUB_OUTPUT
-          echo "Generated $(python3 -c 'import json; print(len(json.load(open(\"blocks.json\"))[\"blocks\"]))') blocks"
+          echo 'Generated blocks (see matrix above)'
 
       - name: Upload blocks configuration
         uses: actions/upload-artifact@v4

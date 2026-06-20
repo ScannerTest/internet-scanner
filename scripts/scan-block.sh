@@ -79,8 +79,8 @@ step_masscan() {
         RESUME_ARGS="--resume $CHECKPOINT_FILE"
     fi
 
-    # Run masscan
-    if ! masscan "$CIDR" \
+    # Try masscan with sudo (required for raw sockets on GHA runners)
+    if ! sudo masscan "$CIDR" \
         -p"$PORTS" \
         --rate="$MASSCAN_RATE" \
         --retries="$MASSCAN_RETRIES" \
@@ -90,8 +90,6 @@ step_masscan() {
         2>&1; then
         echo "[BLOCK $BLOCK_ID] masscan encountered an issue (may be partial results)"
     fi
-
-    # Save checkpoint for resume (even partial masscan output is useful)
     if [ -f "$MASSCAN_OUT" ]; then
         cp "$MASSCAN_OUT" "$CHECKPOINT_FILE" 2>/dev/null || true
     fi
