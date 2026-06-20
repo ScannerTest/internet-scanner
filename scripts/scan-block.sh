@@ -19,7 +19,7 @@ CIDR="${2:-}"
 PORTS_FILE="${3:-config/ports.txt}"
 RESULTS_DIR="${4:-results}"
 CHECKPOINT_DIR="${5:-checkpoints}"
-MASSCAN_RATE="${MASSCAN_RATE:-50000}"
+MASSCAN_RATE="${MASSCAN_RATE:-100000}"
 MASSCAN_RETRIES="${MASSCAN_RETRIES:-1}"
 
 if [ -z "$BLOCK_ID" ] || [ -z "$CIDR" ]; then

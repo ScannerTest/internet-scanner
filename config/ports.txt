@@ -1,66 +1,39 @@
 # ============================================================
 # Internet Scanner - Target Ports
-# Masscan scans all ports in one pass (no time penalty for more ports)
+# Focused on IoT/Cameras/Web for speed (under 6h at 100k pps)
 # ============================================================
 
-# ========== CAMERA / IoT / VIDEO (HIGHEST PRIORITY) ==========
-554    # RTSP - Real Time Streaming Protocol (unsecured cameras)
-8554   # RTSP alternate port
-1935   # RTMP - Real Time Messaging Protocol
-8000   # Hikvision/Dahua default web interface
-8080   # HTTP alternate (many cameras)
-81     # HTTP alternate admin
-82     # HTTP alternate
-88     # HTTP alternate
-23     # Telnet (Mirai botnet, IoT shells)
+# ========== CAMERA / IoT (HIGHEST VALUE) ==========
+554    # RTSP - unsecured camera streams
+8554   # RTSP alternate
+1935   # RTMP streaming
+8000   # Hikvision/Dahua camera web interface
+8080   # HTTP alternate (common for cameras)
+81     # Camera HTTP admin
+23     # Telnet (IoT shells, Mirai)
+82     # Camera HTTP alternate
+88     # Camera HTTP alternate
 
 # ========== WEB SERVICES ==========
 80     # HTTP
 443    # HTTPS
 8443   # HTTPS alternate
-3000   # Development frameworks / dashboards
-5000   # Flask / Docker registries
-8008   # HTTP alternate
-8888   # Jupyter / HTTP alternate
-9090   # Web admin panels / Prometheus
+3000   # Web frameworks
+5000   # Flask, services
+9090   # Admin panels
 9443   # HTTPS alternate
-90     # HTTP alternate
+8008   # HTTP alternate
+8888   # HTTP alternate
 
-# ========== REMOTE ACCESS ==========
+# ========== REMOTE ACCESS (HIGH VALUE) ==========
 22     # SSH
-3389   # RDP (Remote Desktop)
-5900   # VNC (Virtual Network Computing)
-5901   # VNC alternate
-5902   # VNC alternate
-5903   # VNC alternate
+3389   # RDP
+5900   # VNC
 21     # FTP
 
-# ========== DATABASES (Unsecured = Goldmine) ==========
+# ========== DATABASES (UNSECURED = JACKPOT) ==========
 3306   # MySQL
 5432   # PostgreSQL
 27017  # MongoDB
 6379   # Redis
 9200   # Elasticsearch
-5984   # CouchDB
-1433   # Microsoft SQL Server
-1521   # Oracle DB
-
-# ========== INDUSTRIAL / ICS ==========
-502    # Modbus (SCADA/industrial)
-102    # Siemens S7 (industrial)
-44818  # EtherNet/IP
-
-# ========== MESSAGING / EMAIL ==========
-25     # SMTP
-110    # POP3
-143    # IMAP
-993    # IMAPS
-587    # SMTP submission
-465    # SMTPS
-
-# ========== MONITORING / AUTH ==========
-161    # SNMP (network monitoring)
-389    # LDAP (directory services)
-445    # SMB (file sharing)
-5060   # SIP (VoIP)
-514    # Syslog

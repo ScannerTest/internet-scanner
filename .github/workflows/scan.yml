@@ -65,7 +65,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  MASSCAN_RATE: ${{ github.event.inputs.rate || '50000' }}
+  MASSCAN_RATE: ${{ github.event.inputs.rate || '100000' }}
   BLOCKS_TO_SCAN: ${{ github.event.inputs.blocks || '4' }}
   RESUME_MODE: ${{ github.event.inputs.resume || 'yes' }}
   RUN_WHOIS: ${{ github.event.inputs.whois || 'no' }}
