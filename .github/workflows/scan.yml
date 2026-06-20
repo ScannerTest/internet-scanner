@@ -40,14 +40,6 @@ on:
           - '25000'
           - '50000'
           - '100000'
-      resume:
-        description: 'Resume previous scan (skip completed blocks)'
-        required: true
-        default: 'yes'
-        type: choice
-        options:
-          - 'yes'
-          - 'no'
       whois:
         description: 'Run WHOIS lookup on discovered IPs'
         required: true
@@ -67,7 +59,6 @@ concurrency:
 env:
   MASSCAN_RATE: ${{ github.event.inputs.rate || '100000' }}
   BLOCKS_TO_SCAN: ${{ github.event.inputs.blocks || '4' }}
-  RESUME_MODE: ${{ github.event.inputs.resume || 'yes' }}
   RUN_WHOIS: ${{ github.event.inputs.whois || 'no' }}
 
 jobs:
@@ -93,9 +84,8 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Download previous scan state (if resuming)
+      - name: Download previous scan state (auto-resume if exists)
         id: download_state
-        if: env.RESUME_MODE == 'yes'
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
@@ -106,7 +96,7 @@ jobs:
         id: gen
         run: |
           SKIP_FLAG=""
-          if [ "$RESUME_MODE" = "yes" ] && [ -f "previous_state/scan_state.json" ]; then
+          if [ -f "previous_state/scan_state.json" ]; then
             SKIP_FLAG="--skip-completed --artifact-dir previous_state"
             echo "has_previous_state=true" >> $GITHUB_OUTPUT
             echo "Resuming from previous scan state"
