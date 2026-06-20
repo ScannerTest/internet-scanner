@@ -40,11 +40,17 @@ get_subnet() {
 check_cache() {
     local subnet="$1"
     python3 -c "
-import json
-with open('$CACHE_FILE') as f:
-    cache = json.load(f)
+import json, os, sys
+try:
+    if os.path.getsize('$CACHE_FILE') > 0:
+        with open('$CACHE_FILE') as f:
+            cache = json.load(f)
+    else:
+        cache = {}
+except Exception:
+    cache = {}
 print(json.dumps(cache.get('$subnet', None)))
-"
+" 2>/dev/null || echo 'null'
 }
 
 # ---------- Helper: Update cache ----------
@@ -52,13 +58,22 @@ update_cache() {
     local subnet="$1"
     local data="$2"
     python3 -c "
-import json
-with open('$CACHE_FILE') as f:
-    cache = json.load(f)
-cache['$subnet'] = $data
-with open('$CACHE_FILE', 'w') as f:
-    json.dump(cache, f, indent=2)
-"
+import json, os
+try:
+    if os.path.getsize('$CACHE_FILE') > 0:
+        with open('$CACHE_FILE') as f:
+            cache = json.load(f)
+    else:
+        cache = {}
+except Exception:
+    cache = {}
+try:
+    cache['$subnet'] = $data
+    with open('$CACHE_FILE', 'w') as f:
+        json.dump(cache, f, indent=2)
+except Exception:
+    pass
+" 2>/dev/null || true
 }
 
 # ---------- Helper: WHOIS lookup with rate limiting ----------
@@ -81,7 +96,7 @@ do_whois() {
     RESULT=$(whois "$ip" 2>/dev/null || echo '{"error":"whois_failed"}')
     
     # Parse result for key fields
-    PARSED=$(echo "$RESULT" | python3 -c "
+    PARSED=$(printf '%s\n' "$RESULT" | python3 -c "
 import sys, json
 data = sys.stdin.read()
 result = {'raw_ip': '$ip', 'subnet': '$subnet'}
@@ -107,7 +122,7 @@ print(json.dumps(result))
 " 2>/dev/null) || RESULT='{"error":"parse_failed","ip":"'$ip'","subnet":"'$subnet'"}'
     
     # Update cache
-    if echo "$PARSED" | python3 -c "import json,sys; d=json.load(sys.stdin); assert 'error' not in d or d.get('org')" 2>/dev/null; then
+    if printf '%s\n' "$PARSED" | python3 -c "import json,sys; d=json.load(sys.stdin); assert 'error' not in d or d.get('org')" 2>/dev/null; then
         update_cache "$subnet" "$PARSED"
         echo "$PARSED"
     else
@@ -156,7 +171,7 @@ while IFS= read -r ip; do
         RESULT=$(do_whois "$ip")
         echo "$RESULT" >> "$OUTPUT_FILE.$$"
         
-        if echo "$RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); assert 'error' not in d" 2>/dev/null; then
+        if printf '%s\n' "$RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); assert 'error' not in d" 2>/dev/null; then
             SUCCESS=$((SUCCESS + 1))
         else
             FAILED=$((FAILED + 1))
