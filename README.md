@@ -106,6 +106,79 @@ After a run, download these artifacts from the Actions UI:
 - `camera_report/no_auth_cameras.json` — High-confidence no-auth cameras
 - `scan-state` — State file for future resumption
 
+## 🏠 Self-Hosted Database Server
+
+The scanner can push results to your own database server for persistent storage
+and querying. Runs as a Docker container behind Cloudflare Tunnel on your machine.
+
+### Prerequisites
+
+- Docker
+- cloudflared (for the tunnel)
+- A domain with DNS managed by Cloudflare (for a permanent tunnel URL)
+
+### Quick Start
+
+```bash
+# 1. Clone on your server
+git clone git@github.com:ScannerTest/internet-scanner.git
+cd internet-scanner
+
+# 2. Build and run the container (listens on port 8080)
+docker build -t scanner-db server/
+docker run -d --name scanner-db --restart unless-stopped \
+  -v /path/to/data:/data \
+  -p 8080:8080 \
+  scanner-db
+
+# 3. Create a permanent Cloudflare Tunnel
+# (Set this up in your Cloudflare dashboard → Zero Trust → Tunnels)
+cloudflared tunnel create scanner-db
+cloudflared tunnel route dns scanner-db scanner.example.com
+
+# 4. Create tunnel config file at ~/.cloudflared/config.yml:
+# tunnel: <tunnel-uuid>
+# credentials-file: /root/.cloudflared/<tunnel-uuid>.json
+# ingress:
+#   - hostname: scanner.example.com
+#     service: http://localhost:8080
+#   - service: http_status:404
+
+# 5. Run the tunnel as a service
+sudo cloudflared service install
+
+# 6. Update the GitHub secret with your permanent URL
+gh secret set HOME_SERVER_URL -b "https://scanner.example.com"
+```
+
+### Verify it's working
+
+```bash
+curl https://scanner.example.com/health
+# → {"status":"ok","db":"/data/scanner.db"}
+
+curl https://scanner.example.com/stats
+# → {"hosts":0,"http_banners":0,"cameras":0,"whois_subnets":0,"total_scans":0,...}
+```
+
+### Query your data
+
+```bash
+# Count cameras by country (requires WHOIS data)
+curl 'https://scanner.example.com/query?sql=SELECT+c.country,count(*)+FROM+cameras+c+JOIN+whois+w+ON+c.ip+LIKE+w.subnet+GROUP+BY+c.country+ORDER+BY+2+DESC'
+
+# Latest cameras with high confidence
+curl 'https://scanner.example.com/query?sql=SELECT+ip,port,title,confidence+FROM+cameras+WHERE+confidence+>=+4+ORDER+BY+scan_date+DESC+LIMIT+50'
+```
+
+### Env vars to set on GitHub (Settings → Secrets and variables → Actions)
+
+| Secret | Description |
+|--------|-------------|
+| `TURSO_TOKEN` | Turso database auth token (primary cloud backup) |
+| `TURSO_DB_URL` | Turso database URL (e.g. `libsql://...`) |
+| `HOME_SERVER_URL` | Your permanent tunnel URL (e.g. `https://scanner.example.com`) |
+
 ## 🛠 Files
 
 ```
