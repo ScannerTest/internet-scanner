@@ -128,7 +128,7 @@ cd internet-scanner
 docker build -t scanner-db server/
 docker run -d --name scanner-db --restart unless-stopped \
   -v /path/to/data:/data \
-  -p 8080:8080 \
+  -p 9900:9900 \
   scanner-db
 
 # 3. Create a permanent Cloudflare Tunnel
@@ -141,7 +141,7 @@ cloudflared tunnel route dns scanner-db scanner.example.com
 # credentials-file: /root/.cloudflared/<tunnel-uuid>.json
 # ingress:
 #   - hostname: scanner.example.com
-#     service: http://localhost:8080
+#     service: http://localhost:9900
 #   - service: http_status:404
 
 # 5. Run the tunnel as a service

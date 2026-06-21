@@ -8,8 +8,8 @@ Stores everything in a local SQLite database.
 
 Quick start:
     pip install -r requirements.txt
-    python app.py                    # runs on :8080
-    cloudflared tunnel --url http://localhost:8080
+    python app.py                    # runs on :9900
+    cloudflared tunnel --url http://localhost:9900
 
 Endpoints:
     GET  /health          → {"status": "ok"}
@@ -31,7 +31,7 @@ from typing import Optional
 
 DB_PATH = os.environ.get("SCANNER_DB", "scanner.db")
 HOST = os.environ.get("HOST", "0.0.0.0")
-PORT = int(os.environ.get("PORT", "8080"))
+PORT = int(os.environ.get("PORT", "9900"))
 
 app = FastAPI(title="Scanner Database Server", version="1.0.0")
 
