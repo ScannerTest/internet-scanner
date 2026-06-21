@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}WHOIS - Scanner{% endblock %}
+{% set active_page = "whois" %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h2>🔍 WHOIS</h2>
+        <div class="subtitle">Subnet ownership data collected via WHOIS lookups</div>
+    </div>
+    <div class="last-updated">
+        <span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;"></span>
+        {{ whois|length }} total
+    </div>
+</div>
+
+<div class="table-container">
+    <div class="table-header">
+        <h3>Subnet Records</h3>
+        <input type="text" class="table-search" placeholder="Search subnet, org, netname, country...">
+    </div>
+    {% if whois %}
+    <table>
+        <thead>
+            <tr>
+                <th data-sort="0">Subnet <span class="sort-arrow">↕</span></th>
+                <th data-sort="1">Organization <span class="sort-arrow">↕</span></th>
+                <th data-sort="2">Netname <span class="sort-arrow">↕</span></th>
+                <th data-sort="3">Country <span class="sort-arrow">↕</span></th>
+                <th data-sort="4">ASN <span class="sort-arrow">↕</span></th>
+                <th data-sort="5">Last Updated <span class="sort-arrow">↕</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for w in whois %}
+            <tr>
+                <td><span class="ip-cell">{{ w.subnet }}</span></td>
+                <td>{{ w.org or "-" }}</td>
+                <td>{{ w.netname or "-" }}</td>
+                <td><span class="badge badge-blue">{{ w.country or "-" }}</span></td>
+                <td><span class="badge badge-gray">{{ w.asn or "-" }}</span></td>
+                <td style="font-size:0.78rem;color:var(--text-muted);">{{ (w.last_updated[:10] if w.last_updated else "-") }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="table-footer">
+        <span>Showing <span id="visible-count">{{ whois|length }}</span> of {{ whois|length }}</span>
+        <div class="pagination" data-per-page="50" data-current-page="1">
+            <button class="page-btn" data-page="prev" disabled>←</button>
+            <span class="page-info">1 / 1</span>
+            <button class="page-btn" data-page="next" disabled>→</button>
+        </div>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">🔍</div>
+        <h3>No WHOIS data</h3>
+        <p>WHOIS lookups run during the scan. Enable WHOIS in the workflow run.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

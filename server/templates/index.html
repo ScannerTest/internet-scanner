@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Scanner{% endblock %}
+{% set active_page = "dashboard" %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h2>📡 Scanner Dashboard</h2>
+        <div class="subtitle">Internet-wide scan results from your home server</div>
+    </div>
+    {% if last_scan %}
+    <div class="last-updated">
+        <span class="logo-dot" style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;animation:pulse 2s infinite;"></span>
+        Last scan: {{ last_scan }}
+    </div>
+    {% endif %}
+</div>
+
+<!-- Stats Cards -->
+<div class="stats-grid">
+    <div class="stat-card accent-border">
+        <div class="label">Total Scans</div>
+        <div class="value" id="scans-count">{{ stats.total_scans }}</div>
+        <div class="change" style="color:var(--text-muted);">All time</div>
+        <div class="icon-bg">📊</div>
+    </div>
+    <div class="stat-card green-border">
+        <div class="label">Unique Hosts</div>
+        <div class="value" id="hosts-count">{{ stats.hosts | commafy }}</div>
+        <div class="change" style="color:var(--text-muted);">IP addresses discovered</div>
+        <div class="icon-bg">🖥️</div>
+    </div>
+    <div class="stat-card orange-border">
+        <div class="label">HTTP Banners</div>
+        <div class="value" id="banners-count">{{ stats.http_banners | commafy }}</div>
+        <div class="change" style="color:var(--text-muted);">Web server fingerprints</div>
+        <div class="icon-bg">🌐</div>
+    </div>
+    <div class="stat-card blue-border">
+        <div class="label">Cameras</div>
+        <div class="value" id="cameras-count">{{ stats.cameras | commafy }}</div>
+        <div class="change" style="color:var(--text-muted);">Potential cameras detected</div>
+        <div class="icon-bg">📷</div>
+    </div>
+    <div class="stat-card yellow-border">
+        <div class="label">WHOIS Subnets</div>
+        <div class="value" id="whois-count">{{ stats.whois_subnets | commafy }}</div>
+        <div class="change" style="color:var(--text-muted);">Subnets mapped</div>
+        <div class="icon-bg">🔍</div>
+    </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-bottom:2rem;">
+    <!-- Scan Timeline Chart -->
+    <div class="chart-container">
+        <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:1rem;color:var(--text-secondary);">📈 Scan History</h3>
+        {% if scan_history %}
+        <canvas id="scanChart"></canvas>
+        <script>
+        new Chart(document.getElementById('scanChart'), {
+            type: 'bar',
+            data: {
+                labels: [{% for s in scan_history %}'{{ s.scan_date[:10] if s.scan_date else "N/A" }}'{% if not loop.last %},{% endif %}{% endfor %}],
+                datasets: [{
+                    label: 'Hosts Found',
+                    data: [{% for s in scan_history %}{{ s.unique_hosts or 0 }}{% if not loop.last %},{% endif %}{% endfor %}],
+                    backgroundColor: 'rgba(108, 140, 255, 0.5)',
+                    borderColor: 'rgba(108, 140, 255, 0.8)',
+                    borderWidth: 1,
+                    borderRadius: 4,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { 
+                        beginAtZero: true,
+                        grid: { color: 'rgba(42, 46, 62, 0.5)' },
+                        ticks: { color: '#5c6072' }
+                    },
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: '#5c6072', maxTicksLimit: 10 }
+                    }
+                }
+            }
+        });
+        </script>
+        {% else %}
+        <div class="empty-state" style="padding:2rem;">
+            <div class="icon" style="font-size:2rem;">📈</div>
+            <h3>No scan data yet</h3>
+            <p>Run a scan to see results here.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Top Cameras Preview -->
+    <div class="chart-container">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+            <h3 style="font-size:0.9rem;font-weight:600;color:var(--text-secondary);">📷 Recent Cameras</h3>
+            <a href="/cameras" style="font-size:0.8rem;">View all →</a>
+        </div>
+        {% if recent_cameras %}
+        <table style="width:100%;border-collapse:collapse;">
+            <thead>
+                <tr>
+                    <th style="padding:0.5rem 0.75rem;font-size:0.7rem;text-transform:uppercase;color:var(--text-muted);border-bottom:1px solid var(--border);text-align:left;">IP</th>
+                    <th style="padding:0.5rem 0.75rem;font-size:0.7rem;text-transform:uppercase;color:var(--text-muted);border-bottom:1px solid var(--border);text-align:left;">Title</th>
+                    <th style="padding:0.5rem 0.75rem;font-size:0.7rem;text-transform:uppercase;color:var(--text-muted);border-bottom:1px solid var(--border);text-align:left;">Confidence</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in recent_cameras %}
+                <tr style="border-bottom:1px solid var(--border);">
+                    <td style="padding:0.5rem 0.75rem;font-family:'SF Mono','Fira Code',monospace;font-size:0.8rem;color:var(--text-primary);">{{ c.ip }}</td>
+                    <td style="padding:0.5rem 0.75rem;font-size:0.8rem;color:var(--text-secondary);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ c.title or "-" }}</td>
+                    <td style="padding:0.5rem 0.75rem;font-size:0.8rem;">
+                        {% if c.confidence >= 80 %}
+                        <span class="badge badge-green">{{ c.confidence }}%</span>
+                        {% elif c.confidence >= 50 %}
+                        <span class="badge badge-yellow">{{ c.confidence }}%</span>
+                        {% else %}
+                        <span class="badge badge-gray">{{ c.confidence }}%</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state" style="padding:2rem;">
+            <div class="icon" style="font-size:2rem;">📷</div>
+            <h3>No cameras detected yet</h3>
+            <p>Run a scan with camera detection enabled.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Recent Scans Table -->
+<div class="table-container">
+    <div class="table-header">
+        <h3>📋 Recent Scans</h3>
+    </div>
+    {% if scan_history %}
+    <table>
+        <thead>
+            <tr>
+                <th data-sort="0">Date <span class="sort-arrow">↕</span></th>
+                <th data-sort="1">Duration <span class="sort-arrow">↕</span></th>
+                <th data-sort="2">Blocks <span class="sort-arrow">↕</span></th>
+                <th data-sort="3">Hosts <span class="sort-arrow">↕</span></th>
+                <th data-sort="4">Cameras <span class="sort-arrow">↕</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in scan_history %}
+            <tr>
+                <td><span class="cell-highlight">{{ s.scan_date[:19] if s.scan_date else "N/A" }}</span></td>
+                <td>
+                    {% if s.scan_duration_seconds %}
+                        {% set mins = s.scan_duration_seconds // 60 %}
+                        {% set secs = s.scan_duration_seconds % 60 %}
+                        {{ mins }}m {{ secs }}s
+                    {% else %}-{% endif %}
+                </td>
+                <td>{{ s.blocks_processed or 0 }}</td>
+                <td>{{ s.unique_hosts | commafy or 0 }}</td>
+                <td>{{ s.potential_cameras or 0 }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon" style="font-size:3rem;">📡</div>
+        <h3>No scan data yet</h3>
+        <p>Scan results will appear here after the first workflow run pushes data to this server.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

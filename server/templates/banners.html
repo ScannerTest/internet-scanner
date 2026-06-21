@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}HTTP Banners - Scanner{% endblock %}
+{% set active_page = "banners" %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h2>🌐 HTTP Banners</h2>
+        <div class="subtitle">Web server fingerprints collected via httpx</div>
+    </div>
+    <div class="last-updated">
+        <span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;"></span>
+        {{ banners|length }} total
+    </div>
+</div>
+
+<div class="table-container">
+    <div class="table-header">
+        <h3>HTTP Banner Records</h3>
+        <input type="text" class="table-search" placeholder="Search IP, title, server, URL...">
+    </div>
+    {% if banners %}
+    <table>
+        <thead>
+            <tr>
+                <th data-sort="0">IP <span class="sort-arrow">↕</span></th>
+                <th data-sort="1">Port <span class="sort-arrow">↕</span></th>
+                <th data-sort="2">Status <span class="sort-arrow">↕</span></th>
+                <th data-sort="3">Title <span class="sort-arrow">↕</span></th>
+                <th data-sort="4">Server <span class="sort-arrow">↕</span></th>
+                <th data-sort="5">URL <span class="sort-arrow">↕</span></th>
+                <th data-sort="6">Scan Date <span class="sort-arrow">↕</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for b in banners %}
+            <tr>
+                <td><span class="ip-cell">{{ b.ip }}</span></td>
+                <td><span class="badge badge-blue">{{ b.port }}</span></td>
+                <td>
+                    {% if b.status_code and b.status_code >= 200 and b.status_code < 300 %}
+                    <span class="badge badge-green">{{ b.status_code }}</span>
+                    {% elif b.status_code and b.status_code >= 300 and b.status_code < 400 %}
+                    <span class="badge badge-yellow">{{ b.status_code }}</span>
+                    {% elif b.status_code and b.status_code >= 400 %}
+                    <span class="badge badge-orange">{{ b.status_code }}</span>
+                    {% else %}
+                    <span class="badge badge-gray">{{ b.status_code or "-" }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ b.title or "-" }}</td>
+                <td>{{ b.server or "-" }}</td>
+                <td style="max-width:250px;">{{ b.url or "-" }}</td>
+                <td style="font-size:0.78rem;color:var(--text-muted);">{{ (b.scan_date[:10] if b.scan_date else "-") }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="table-footer">
+        <span>Showing <span id="visible-count">{{ banners|length }}</span> of {{ banners|length }}</span>
+        <div class="pagination" data-per-page="50" data-current-page="1">
+            <button class="page-btn" data-page="prev" disabled>←</button>
+            <span class="page-info">1 / 1</span>
+            <button class="page-btn" data-page="next" disabled>→</button>
+        </div>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">🌐</div>
+        <h3>No HTTP banners</h3>
+        <p>HTTP banner grabbing runs during the scan. No data yet.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

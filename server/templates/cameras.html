@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Cameras - Scanner{% endblock %}
+{% set active_page = "cameras" %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h2>📷 Cameras</h2>
+        <div class="subtitle">Potential IP cameras detected across scanned blocks</div>
+    </div>
+    <div class="last-updated">
+        <span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;"></span>
+        {{ cameras|length }} total
+    </div>
+</div>
+
+<div class="table-container">
+    <div class="table-header">
+        <h3>Camera Detections</h3>
+        <input type="text" class="table-search" placeholder="Search IP, title, server...">
+    </div>
+    {% if cameras %}
+    <table>
+        <thead>
+            <tr>
+                <th data-sort="0">IP <span class="sort-arrow">↕</span></th>
+                <th data-sort="1">Port <span class="sort-arrow">↕</span></th>
+                <th data-sort="2">Title <span class="sort-arrow">↕</span></th>
+                <th data-sort="3">Confidence <span class="sort-arrow">↕</span></th>
+                <th data-sort="4">Type <span class="sort-arrow">↕</span></th>
+                <th data-sort="5">Source <span class="sort-arrow">↕</span></th>
+                <th data-sort="6">Server <span class="sort-arrow">↕</span></th>
+                <th data-sort="7">Scan Date <span class="sort-arrow">↕</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in cameras %}
+            <tr>
+                <td><span class="ip-cell">{{ c.ip }}</span></td>
+                <td><span class="badge {% if c.port == 80 %}badge-blue{% elif c.port == 443 %}badge-green{% elif c.port == 554 %}badge-orange{% else %}badge-gray{% endif %}">{{ c.port }}</span></td>
+                <td>{{ c.title or "-" }}</td>
+                <td>
+                    {% if c.confidence >= 80 %}
+                    <span class="badge badge-green">{{ c.confidence }}%</span>
+                    {% elif c.confidence >= 50 %}
+                    <span class="badge badge-yellow">{{ c.confidence }}%</span>
+                    {% elif c.confidence >= 20 %}
+                    <span class="badge badge-orange">{{ c.confidence }}%</span>
+                    {% else %}
+                    <span class="badge badge-gray">{{ c.confidence }}%</span>
+                    {% endif %}
+                </td>
+                <td><span class="badge badge-blue">{{ c.type or "camera" }}</span></td>
+                <td>{{ c.source or "scan" }}</td>
+                <td>{{ c.server or "-" }}</td>
+                <td style="font-size:0.78rem;color:var(--text-muted);">{{ (c.scan_date[:10] if c.scan_date else "-") }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="table-footer">
+        <span>Showing <span id="visible-count">{{ cameras|length }}</span> of {{ cameras|length }}</span>
+        <div class="pagination" data-per-page="50" data-current-page="1">
+            <button class="page-btn" data-page="prev" disabled>←</button>
+            <span class="page-info">1 / 1</span>
+            <button class="page-btn" data-page="next" disabled>→</button>
+        </div>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">📷</div>
+        <h3>No cameras detected</h3>
+        <p>Camera detection happens during the merge step. Run a scan first.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

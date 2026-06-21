@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Hosts - Scanner{% endblock %}
+{% set active_page = "hosts" %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h2>🖥️ Hosts</h2>
+        <div class="subtitle">All unique IP addresses discovered across scans</div>
+    </div>
+    <div class="last-updated">
+        <span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;"></span>
+        {{ hosts|length }} total
+    </div>
+</div>
+
+<div class="table-container">
+    <div class="table-header">
+        <h3>Host Records</h3>
+        <input type="text" class="table-search" placeholder="Search IP...">
+    </div>
+    {% if hosts %}
+    <table>
+        <thead>
+            <tr>
+                <th data-sort="0">IP <span class="sort-arrow">↕</span></th>
+                <th data-sort="1">First Seen <span class="sort-arrow">↕</span></th>
+                <th data-sort="2">Last Seen <span class="sort-arrow">↕</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for h in hosts %}
+            <tr>
+                <td><span class="ip-cell">{{ h.ip }}</span></td>
+                <td style="font-size:0.78rem;color:var(--text-muted);">{{ (h.first_seen[:19] if h.first_seen else "-") }}</td>
+                <td style="font-size:0.78rem;color:var(--text-muted);">{{ (h.last_seen[:19] if h.last_seen else "-") }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="table-footer">
+        <span>Showing <span id="visible-count">{{ hosts|length }}</span> of {{ hosts|length }}</span>
+        <div class="pagination" data-per-page="50" data-current-page="1">
+            <button class="page-btn" data-page="prev" disabled>←</button>
+            <span class="page-info">1 / 1</span>
+            <button class="page-btn" data-page="next" disabled>→</button>
+        </div>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">🖥️</div>
+        <h3>No hosts discovered</h3>
+        <p>Hosts appear after the first masscan run completes.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
