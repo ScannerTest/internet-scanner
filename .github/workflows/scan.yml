@@ -10,6 +10,7 @@
 # - masscan --resume support for partial scans
 # - State tracking across runs
 # - No work is ever lost
+# - Every heavy task is chunked → no single job exceeds 6h
 # ============================================================
 name: Internet Scanner
 
@@ -120,6 +121,8 @@ jobs:
 
   # ============================================================
   # JOB 2: SCAN BLOCKS - Matrix of parallel scanning jobs
+  # Does: masscan + zgrab2 + nuclei + camera analysis
+  # httpx runs in the dedicated http-banners job (below)
   # ============================================================
   scan:
     name: "Scan Block ${{ matrix.block.block }}"
@@ -214,16 +217,99 @@ jobs:
           fi
 
   # ============================================================
-  # JOB 3: WHOIS - Runs in parallel with scan blocks
-  # Covers ALL /24 subnets in the block range, not just live hosts.
-  # Cache fills up across runs (65K /24s per block, ~6K per 6h job).
-  # On cron (schedule), always runs. On manual, respects the input.
+  # JOB 3: HTTP BANNERS - httpx on chunked targets per block
+  #
+  # Runs as block × chunk matrix (e.g. 4 blocks × 8 chunks = 32 jobs).
+  # Each chunk gets ~1/8 of HTTP targets for its block via IP hash.
+  # Each job has its own 6h timeout, finishes in ~30-60 min.
+  # If a chunk times out, only that 1/8 of that block's banners is lost.
+  # ============================================================
+  http-banners:
+    name: "HTTP Banners - Block ${{ matrix.block.block }} Chunk ${{ matrix.chunk }}"
+    runs-on: ubuntu-latest
+    needs: [init, scan]
+    if: ${{ fromJSON(needs.init.outputs.block_count) > 0 }}
+
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        block: ${{ fromJSON(needs.init.outputs.blocks) }}
+        chunk: [0, 1, 2, 3, 4, 5, 6, 7]
+
+    env:
+      BLOCK_ID: ${{ matrix.block.block }}
+      CHUNK_ID: ${{ matrix.chunk }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install httpx
+        run: |
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest 2>&1 | tail -1
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+
+      - name: Download Block Scan Results
+        uses: actions/download-artifact@v4
+        with:
+          name: scan-results-${{ env.BLOCK_ID }}
+          path: scan_data
+
+      - name: Extract HTTP Targets for this Chunk
+        run: |
+          python3 scripts/http-banner-chunk.py \
+            "scan_data/masscan_${{ env.BLOCK_ID }}.json" \
+            ${{ env.CHUNK_ID }} \
+            8 \
+            > http_targets_chunk.txt
+
+      - name: Run httpx Banner Grabbing
+        run: |
+          if [ ! -s http_targets_chunk.txt ]; then
+            echo '[]' > "http_banners_${{ env.BLOCK_ID }}_${{ env.CHUNK_ID }}.json"
+            echo "No HTTP targets for this chunk"
+          else
+            httpx -l http_targets_chunk.txt \
+              -title -status-code -server -tech-detect \
+              -json -o "http_banners_${{ env.BLOCK_ID }}_${{ env.CHUNK_ID }}.json" \
+              -threads 100 -timeout 5 -retries 1 \
+              2>&1 || echo "httpx encountered errors (partial results saved)"
+            echo "Results: $(wc -l < "http_banners_${{ env.BLOCK_ID }}_${{ env.CHUNK_ID }}.json") entries"
+          fi
+
+      - name: Upload HTTP Banner Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-banners-${{ env.BLOCK_ID }}-${{ env.CHUNK_ID }}
+          path: "http_banners_${{ env.BLOCK_ID }}_${{ env.CHUNK_ID }}.json"
+          retention-days: 90
+          if-no-files-found: warn
+
+  # ============================================================
+  # JOB 4: WHOIS - Per-block subnet map, runs parallel with scan
+  #
+  # Each block independently processes its /24 subnets (~12K per run).
+  # At ~1.1s/lookup, that's ~3.7h — safe margin under the 6h limit.
+  # Cache persists per-block across runs (checkpoint every 100 IPs).
+  # Over many cron runs, each block's cache fills up completely.
   # ============================================================
   whois:
-    name: "WHOIS - Subnet Map"
+    name: "WHOIS - Block ${{ matrix.block.block }}"
     runs-on: ubuntu-latest
     needs: [init]
-    if: ${{ always() && (github.event_name == 'schedule' || github.event.inputs.whois == 'yes') }}
+    if: ${{ always() && (github.event_name == 'schedule' || github.event.inputs.whois == 'yes') && fromJSON(needs.init.outputs.block_count) > 0 }}
+
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        block: ${{ fromJSON(needs.init.outputs.blocks) }}
+
+    env:
+      BLOCK_ID: ${{ matrix.block.block }}
+      BLOCK_CIDR: ${{ matrix.block.cidr }}
 
     steps:
       - name: Checkout
@@ -234,38 +320,37 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Download Blocks Config
-        uses: actions/download-artifact@v4
-        with:
-          name: blocks-config
-          path: blocks_data
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq whois bc 2>&1 | tail -3
 
-      - name: Generate All /24 Subnets from Blocks
+      - name: Generate /24 Subnets for this Block
         run: |
           python3 scripts/generate-subnets.py \
-            blocks_data/blocks.json \
+            --cidr "${{ env.BLOCK_CIDR }}" \
             all_subnets.txt \
-            --max-subnets 20000
-          echo "Total /24 subnets to process: $(wc -l < all_subnets.txt)"
+            --max-subnets 12000
+          echo "Subnets to process: $(wc -l < all_subnets.txt)"
 
       - name: Download Previous WHOIS Cache
-        id: dl_whois_cache
+        id: dl_cache
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          name: whois-cache
+          name: whois-cache-${{ env.BLOCK_ID }}
           path: whois_cache_prev
 
       - name: Restore Previous Cache
         run: |
           if [ -f "whois_cache_prev/whois_cache.json" ]; then
             cp whois_cache_prev/whois_cache.json whois_cache.json
-            echo "Restored WHOIS cache with $(python3 -c 'import json; print(len(json.load(open(\"whois_cache.json\"))))') entries"
+            echo "Restored cache with $(python3 -c 'import json; print(len(json.load(open(\"whois_cache.json\"))))') entries"
           else
             echo '{}' > whois_cache.json
           fi
 
-      - name: Run WHOIS on All /24 Subnets
+      - name: Run WHOIS on Block Subnets
         run: |
           bash scripts/whois-cached.sh \
             all_subnets.txt \
@@ -274,19 +359,24 @@ jobs:
             whois_results.json \
             whois_checkpoint.json
 
+      - name: Rename Results for Per-Block Artifacts
+        run: |
+          mv whois_results.json whois_results_${{ env.BLOCK_ID }}.json
+          mv whois_retry.json whois_retry_${{ env.BLOCK_ID }}.json
+          mv whois_checkpoint.json whois_checkpoint_${{ env.BLOCK_ID }}.json
+
       - name: Summary
         run: |
           CACHE_SIZE=$(python3 -c 'import json; print(len(json.load(open("whois_cache.json"))))' 2>/dev/null || echo 0)
-          DONE=$(wc -l < whois_results.json 2>/dev/null || echo 0)
-          echo "### WHOIS Map Complete" >> $GITHUB_STEP_SUMMARY
+          echo "### WHOIS Block ${{ env.BLOCK_ID }} Complete" >> $GITHUB_STEP_SUMMARY
+          echo "- Block CIDR: ${{ env.BLOCK_CIDR }}" >> $GITHUB_STEP_SUMMARY
           echo "- Cache entries: $CACHE_SIZE /24 subnets mapped" >> $GITHUB_STEP_SUMMARY
-          echo "- New lookups this run: $DONE" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload WHOIS Cache
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: whois-cache
+          name: whois-cache-${{ env.BLOCK_ID }}
           path: whois_cache.json
           retention-days: 90
           if-no-files-found: warn
@@ -295,21 +385,22 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: whois-results
+          name: whois-results-${{ env.BLOCK_ID }}
           path: |
-            whois_results.json
-            whois_retry.json
-            whois_checkpoint.json
+            whois_results_${{ env.BLOCK_ID }}.json
+            whois_retry_${{ env.BLOCK_ID }}.json
+            whois_checkpoint_${{ env.BLOCK_ID }}.json
           retention-days: 90
           if-no-files-found: warn
 
   # ============================================================
-  # JOB 4: MERGE - Combine all results
+  # JOB 5: MERGE - Combine all results
+  # Collects: scan block results + http banner chunks + whois results
   # ============================================================
   merge:
     name: "Merge - Combine All Results"
     runs-on: ubuntu-latest
-    needs: [init, scan]
+    needs: [init, scan, http-banners]
     if: ${{ always() }}
 
     steps:
@@ -328,6 +419,27 @@ jobs:
           path: scan_results
           merge-multiple: true
 
+      - name: Download All HTTP Banner Chunks
+        uses: actions/download-artifact@v4
+        with:
+          pattern: http-banners-*
+          path: http_banners
+          merge-multiple: true
+
+      - name: Download WHOIS Results (best-effort, may still be running)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: whois-results-*
+          path: whois_data
+          merge-multiple: true
+
+      - name: Merge HTTP Banner Chunks into Scan Results
+        run: |
+          # Copy all chunked http_banners_*.json into scan_results/
+          cp http_banners/*.json scan_results/ 2>/dev/null || true
+          echo "HTTP banner chunks merged: $(ls http_banners/*.json 2>/dev/null | wc -l) files"
+
       - name: Run Merge Script
         run: |
           mkdir -p final_results
@@ -335,19 +447,12 @@ jobs:
             scan_results \
             final_results
 
-      - name: Download WHOIS Results (if available from parallel job)
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: whois-results
-          path: whois_data
-
-      - name: Copy WHOIS data into final results
+      - name: Copy WHOIS Data into Final Results
         continue-on-error: true
         run: |
-          if [ -f "whois_data/whois_results.json" ]; then
-            cp whois_data/whois_results.json final_results/all_whois.json
-            echo "WHOIS data merged: $(wc -c < whois_data/whois_results.json) bytes"
+          if ls whois_data/whois_results_*.json 1>/dev/null 2>&1; then
+            cat whois_data/whois_results_*.json > final_results/all_whois.json
+            echo "WHOIS data merged: $(wc -c < final_results/all_whois.json) bytes"
           fi
 
       - name: Run Camera Detection
@@ -394,7 +499,7 @@ jobs:
           if-no-files-found: warn
 
   # ============================================================
-  # JOB 5: REPORT - Final notification
+  # JOB 6: REPORT - Final notification
   # ============================================================
   report:
     name: "Report - Generate Notifications"

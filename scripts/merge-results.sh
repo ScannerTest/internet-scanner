@@ -80,19 +80,11 @@ for block_dir in "${BLOCK_DIRS[@]}"; do
             hosts_file="${block_dir}/live_hosts_${BID}.txt"
             [ -f "$hosts_file" ] && cat "$hosts_file" >> "$COMBINED_HOSTS"
             
-            # HTTP banners (NDJSON)
-            http_file="${block_dir}/http_banners_${BID}.json"
-            if [ -f "$http_file" ] && [ -s "$http_file" ]; then
-                cat "$http_file" >> "${COMBINED_HTTP_BANNERS}.tmp" 2>/dev/null || true
-            fi
-
             # Cameras (NDJSON format)
             cams_file="${block_dir}/cameras_${BID}.json"
             if [ -f "$cams_file" ] && [ -s "$cams_file" ]; then
-                # Check if JSON array or NDJSON
                 if head -c 1 "$cams_file" | grep -q '\['
                 then
-                    # JSON array - extract items as NDJSON
                     python3 -c "
 import json
 try:
@@ -104,7 +96,6 @@ except:
     pass
 " 2>/dev/null || true
                 else
-                    # Already NDJSON
                     cat "$cams_file" >> "${COMBINED_CAMERAS}.tmp" 2>/dev/null || true
                 fi
             fi
@@ -119,12 +110,6 @@ except:
         
         hosts_file="${block_dir}/live_hosts_${BLOCK_ID}.txt"
         [ -f "$hosts_file" ] && cat "$hosts_file" >> "$COMBINED_HOSTS"
-        
-        # HTTP banners (NDJSON)
-        http_file="${block_dir}/http_banners_${BLOCK_ID}.json"
-        if [ -f "$http_file" ] && [ -s "$http_file" ]; then
-            cat "$http_file" >> "${COMBINED_HTTP_BANNERS}.tmp" 2>/dev/null || true
-        fi
 
         cams_file="${block_dir}/cameras_${BLOCK_ID}.json"
         if [ -f "$cams_file" ] && [ -s "$cams_file" ]; then
@@ -147,6 +132,20 @@ except:
         BLOCK_COUNT=$((BLOCK_COUNT + 1))
     fi
 done
+
+# ---------- Collect HTTP banners from chunked httpx results ----------
+# http_banners_BLOCKID_CHUNKID.json are merged into the artifacts dir
+# by the http-banners job (copied from http_banners/ into scan_results/)
+echo "Collecting HTTP banner chunks..."
+HTTP_CHUNK_COUNT=0
+for f in "$ARTIFACTS_DIR"/http_banners_*.json; do
+    [ -f "$f" ] || continue
+    if [ -s "$f" ]; then
+        cat "$f" >> "${COMBINED_HTTP_BANNERS}.tmp" 2>/dev/null || true
+        HTTP_CHUNK_COUNT=$((HTTP_CHUNK_COUNT + 1))
+    fi
+done
+echo "Collected $HTTP_CHUNK_COUNT HTTP banner chunk files"
 
 # Deduplicate hosts
 sort -u "$COMBINED_HOSTS" -o "$COMBINED_HOSTS" 2>/dev/null || true
