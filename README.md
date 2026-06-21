@@ -159,17 +159,65 @@ curl https://scanner.1110777.xyz/health
 
 curl https://scanner.1110777.xyz/stats
 # → {"hosts":0,"http_banners":0,"cameras":0,"whois_subnets":0,"total_scans":0,...}
+
+curl https://scanner.1110777.xyz/
+# → <!DOCTYPE html><html...> (dashboard HTML)
 ```
 
-### Query your data
+### 📖 Recovering from scratch (container goes down)
+
+If the container dies, the server reboots, or you need to set it up on a new machine:
 
 ```bash
-# Count cameras by country (requires WHOIS data)
-curl 'https://scanner.1110777.xyz/query?sql=SELECT+c.country,count(*)+FROM+cameras+c+JOIN+whois+w+ON+c.ip+LIKE+w.subnet+GROUP+BY+c.country+ORDER+BY+2+DESC'
+# 1. Clone the repo and enter server directory
+git clone git@github.com:ScannerTest/internet-scanner.git
+cd internet-scanner/server
 
-# Latest cameras with high confidence
-curl 'https://scanner.1110777.xyz/query?sql=SELECT+ip,port,title,confidence+FROM+cameras+WHERE+confidence+>=+4+ORDER+BY+scan_date+DESC+LIMIT+50'
+# 2. Build the Docker image
+docker build -t scanner-db .
+
+# 3. Create data directory (this holds your SQLite DB - data survives rebuilds)
+mkdir -p ~/scanner-db/data
+
+# 4. Run the container
+#    -v binds the data directory so the DB persists across container restarts
+#    -p exposes port 9900 (what Cloudflare Tunnel connects to)
+#    -e API_TOKEN is the Bearer token used by push-to-turso.py to authenticate
+docker run -d --name scanner-db --restart unless-stopped \
+  -v ~/scanner-db/data:/data \
+  -p 9900:9900 \
+  -e API_TOKEN=scan-fbe7eebc3d7447fcbec2f676 \
+  scanner-db
+
+# 5. Verify it's running
+curl http://localhost:9900/health
+curl http://localhost:9900/
+
+# 6. Make sure your Cloudflare Tunnel is running and points to localhost:9900
+#    (your tunnel config at ~/.cloudflared/config.yml should have:
+#      service: http://localhost:9900)
+sudo systemctl status cloudflared
 ```
+
+**That's it.** The container auto-starts on boot (`--restart unless-stopped`).
+The database at `~/scanner-db/data/scanner.db` persists across rebuilds.
+If you need the API token for a fresh setup, it's set both in the container and
+in GitHub's `HOME_SERVER_TOKEN` secret.
+
+### Dashboard
+
+The server comes with a built-in dashboard at the root URL:
+
+| Page | Description |
+|------|-------------|
+| `/` | Overview with stats cards, scan chart, recent scans |
+| `/cameras` | Camera detections table, sorted by confidence |
+| `/banners` | HTTP banner fingerprints |
+| `/hosts` | All discovered IPs |
+| `/whois` | Subnet ownership data |
+
+All dashboard pages read directly from the local SQLite database.
+No API endpoint needed — just open the URL in a browser.
 
 ### Env vars to set on GitHub (Settings → Secrets and variables → Actions)
 
@@ -178,6 +226,7 @@ curl 'https://scanner.1110777.xyz/query?sql=SELECT+ip,port,title,confidence+FROM
 | `TURSO_TOKEN` | Turso database auth token (primary cloud backup) |
 | `TURSO_DB_URL` | Turso database URL (e.g. `libsql://...`) |
 | `HOME_SERVER_URL` | Your permanent tunnel URL (e.g. `https://scanner.1110777.xyz`) |
+| `HOME_SERVER_TOKEN` | Bearer token for home server auth (matches API_TOKEN in the container) |
 
 ## 🛠 Files
 
