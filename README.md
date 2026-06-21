@@ -179,14 +179,20 @@ docker build -t scanner-db .
 # 3. Create data directory (this holds your SQLite DB - data survives rebuilds)
 mkdir -p ~/scanner-db/data
 
-# 4. Run the container
+# 4. Set your API token and run the container
+#    Get the token from your local .env file:
+#      grep HOME_SERVER_TOKEN .env
+#    Or get it from GitHub secrets:
+#      gh secret list
+#
 #    -v binds the data directory so the DB persists across container restarts
 #    -p exposes port 9900 (what Cloudflare Tunnel connects to)
-#    -e API_TOKEN is the Bearer token used by push-to-turso.py to authenticate
+#    -e API_TOKEN must match the HOME_SERVER_TOKEN secret on GitHub
+TOKEN=$(grep HOME_SERVER_TOKEN .env | cut -d= -f2)
 docker run -d --name scanner-db --restart unless-stopped \
   -v ~/scanner-db/data:/data \
   -p 9900:9900 \
-  -e API_TOKEN=scan-fbe7eebc3d7447fcbec2f676 \
+  -e API_TOKEN=$TOKEN \
   scanner-db
 
 # 5. Verify it's running
@@ -201,8 +207,8 @@ sudo systemctl status cloudflared
 
 **That's it.** The container auto-starts on boot (`--restart unless-stopped`).
 The database at `~/scanner-db/data/scanner.db` persists across rebuilds.
-If you need the API token for a fresh setup, it's set both in the container and
-in GitHub's `HOME_SERVER_TOKEN` secret.
+The API token comes from your `.env` file (see below) and must match GitHub's
+`HOME_SERVER_TOKEN` secret exactly.
 
 ### Dashboard
 
