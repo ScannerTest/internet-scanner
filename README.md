@@ -134,13 +134,13 @@ docker run -d --name scanner-db --restart unless-stopped \
 # 3. Create a permanent Cloudflare Tunnel
 # (Set this up in your Cloudflare dashboard → Zero Trust → Tunnels)
 cloudflared tunnel create scanner-db
-cloudflared tunnel route dns scanner-db scanner.example.com
+cloudflared tunnel route dns scanner-db scanner.1110777.xyz
 
 # 4. Create tunnel config file at ~/.cloudflared/config.yml:
 # tunnel: <tunnel-uuid>
 # credentials-file: /root/.cloudflared/<tunnel-uuid>.json
 # ingress:
-#   - hostname: scanner.example.com
+#   - hostname: scanner.1110777.xyz
 #     service: http://localhost:9900
 #   - service: http_status:404
 
@@ -148,16 +148,16 @@ cloudflared tunnel route dns scanner-db scanner.example.com
 sudo cloudflared service install
 
 # 6. Update the GitHub secret with your permanent URL
-gh secret set HOME_SERVER_URL -b "https://scanner.example.com"
+gh secret set HOME_SERVER_URL -b "https://scanner.1110777.xyz"
 ```
 
 ### Verify it's working
 
 ```bash
-curl https://scanner.example.com/health
+curl https://scanner.1110777.xyz/health
 # → {"status":"ok","db":"/data/scanner.db"}
 
-curl https://scanner.example.com/stats
+curl https://scanner.1110777.xyz/stats
 # → {"hosts":0,"http_banners":0,"cameras":0,"whois_subnets":0,"total_scans":0,...}
 ```
 
@@ -165,10 +165,10 @@ curl https://scanner.example.com/stats
 
 ```bash
 # Count cameras by country (requires WHOIS data)
-curl 'https://scanner.example.com/query?sql=SELECT+c.country,count(*)+FROM+cameras+c+JOIN+whois+w+ON+c.ip+LIKE+w.subnet+GROUP+BY+c.country+ORDER+BY+2+DESC'
+curl 'https://scanner.1110777.xyz/query?sql=SELECT+c.country,count(*)+FROM+cameras+c+JOIN+whois+w+ON+c.ip+LIKE+w.subnet+GROUP+BY+c.country+ORDER+BY+2+DESC'
 
 # Latest cameras with high confidence
-curl 'https://scanner.example.com/query?sql=SELECT+ip,port,title,confidence+FROM+cameras+WHERE+confidence+>=+4+ORDER+BY+scan_date+DESC+LIMIT+50'
+curl 'https://scanner.1110777.xyz/query?sql=SELECT+ip,port,title,confidence+FROM+cameras+WHERE+confidence+>=+4+ORDER+BY+scan_date+DESC+LIMIT+50'
 ```
 
 ### Env vars to set on GitHub (Settings → Secrets and variables → Actions)
@@ -177,7 +177,7 @@ curl 'https://scanner.example.com/query?sql=SELECT+ip,port,title,confidence+FROM
 |--------|-------------|
 | `TURSO_TOKEN` | Turso database auth token (primary cloud backup) |
 | `TURSO_DB_URL` | Turso database URL (e.g. `libsql://...`) |
-| `HOME_SERVER_URL` | Your permanent tunnel URL (e.g. `https://scanner.example.com`) |
+| `HOME_SERVER_URL` | Your permanent tunnel URL (e.g. `https://scanner.1110777.xyz`) |
 
 ## 🛠 Files
 
