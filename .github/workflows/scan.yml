@@ -498,6 +498,14 @@ jobs:
           retention-days: 90
           if-no-files-found: warn
 
+      - name: Push Results to Turso (best-effort)
+        continue-on-error: true
+        env:
+          TURSO_TOKEN: ${{ secrets.TURSO_TOKEN }}
+          TURSO_DB_URL: ${{ secrets.TURSO_DB_URL }}
+        run: |
+          python3 scripts/push-to-turso.py final_results
+
   # ============================================================
   # JOB 6: REPORT - Final notification
   # ============================================================
